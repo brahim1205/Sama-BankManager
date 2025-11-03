@@ -71,11 +71,11 @@ RUN chown -R nginx:nginx storage bootstrap/cache \
 ENV APP_ENV=production \
     APP_DEBUG=false \
     PHP_FPM_SOCK=/run/php/php-fpm.sock \
-    PORT=8080
+    PORT=8086
 
 USER nginx
 
-EXPOSE 8080
+EXPOSE 8086
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["sh", "-c", \
