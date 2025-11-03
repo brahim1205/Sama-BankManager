@@ -68,7 +68,7 @@ RUN php artisan key:generate --force && \
 USER root
 
 # Copier le script d'entrée
-COPY docker-entrypoint.sh /usr/local/bin/
+COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Passer à l'utilisateur non-root
