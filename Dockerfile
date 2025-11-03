@@ -6,7 +6,7 @@ WORKDIR /app
 # Copier les fichiers de dépendances
 COPY composer.json composer.lock ./
 
-# Installer les dépendances PHP
+# Installer les dépendances PHP sans scripts post-install
 RUN composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist --no-scripts
 
 # Étape 2: Image finale pour l'application
@@ -26,29 +26,56 @@ WORKDIR /var/www/html
 COPY --from=composer-build /app/vendor ./vendor
 
 # Copier le reste du code de l'application
-COPY --chown=laravel:laravel . .
+COPY . .
 
 # Créer les répertoires nécessaires et définir les permissions
 RUN mkdir -p storage/framework/{cache,data,sessions,testing,views} \
     && mkdir -p storage/logs \
-    && mkdir -p storage/app/public \
     && mkdir -p bootstrap/cache \
     && chown -R laravel:laravel /var/www/html \
-    && chmod -R 775 storage bootstrap/cache \
-    && chmod -R 775 storage/app
+    && chmod -R 775 storage bootstrap/cache
 
-# Ne PAS créer de .env ici - utiliser les variables d'environnement de Render
+# Créer un fichier .env minimal pour le build
+RUN echo "APP_NAME=Laravel" > .env && \
+    echo "APP_ENV=production" >> .env && \
+    echo "APP_KEY=" >> .env && \
+    echo "APP_DEBUG=false" >> .env && \
+    echo "APP_URL=http://localhost" >> .env && \
+    echo "" >> .env && \
+    echo "LOG_CHANNEL=stack" >> .env && \
+    echo "LOG_LEVEL=error" >> .env && \
+    echo "" >> .env && \
+    echo "DB_CONNECTION=pgsql" >> .env && \
+    echo "DB_HOST=\${DB_HOST}" >> .env && \
+    echo "DB_PORT=\${DB_PORT}" >> .env && \
+    echo "DB_DATABASE=\${DB_DATABASE}" >> .env && \
+    echo "DB_USERNAME=\${DB_USERNAME}" >> .env && \
+    echo "DB_PASSWORD=\${DB_PASSWORD}" >> .env && \
+    echo "" >> .env && \
+    echo "CACHE_DRIVER=file" >> .env && \
+    echo "SESSION_DRIVER=file" >> .env && \
+    echo "QUEUE_CONNECTION=sync" >> .env
 
-# Copier le script d'entrée en tant que root
-COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
-    && chown laravel:laravel /usr/local/bin/docker-entrypoint.sh
+# Changer les permissions du fichier .env pour l'utilisateur laravel
+RUN chown laravel:laravel .env
+
+# Générer la clé d'application et optimiser
+USER laravel
+RUN php artisan key:generate --force && \
+    php artisan config:cache && \
+    php artisan route:cache && \
+    php artisan view:cache
+USER root
+
+# Copier le script d'entrée
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Passer à l'utilisateur non-root
 USER laravel
 
-# Exposer le port
+# Exposer le port 8000
 EXPOSE 8000
 
-# Point d'entrée - le script lance directement php artisan serve
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# Commande par défaut
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
