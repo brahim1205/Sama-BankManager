@@ -1,83 +1,54 @@
-# syntax=docker/dockerfile:1.7
+# Étape 1: Build des dépendances PHP
+FROM composer:2.6 AS composer-build
 
-# ---------- Base images ----------
-FROM composer:2 AS composer_base
-FROM node:20-alpine AS node_base
+WORKDIR /app
 
-# ---------- Build stage ----------
-FROM php:8.3-fpm-alpine AS build
+# Copier les fichiers de dépendances
+COPY composer.json composer.lock ./
 
-# Install system deps
-RUN apk add --no-cache git zip unzip icu-dev oniguruma-dev libzip-dev libpng-dev libjpeg-turbo-dev libwebp-dev libpq-dev bash
+# Installer les dépendances PHP
+RUN composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist --no-scripts
 
-# PHP extensions
-RUN docker-php-ext-configure gd --with-jpeg --with-webp \
-  && docker-php-ext-install -j$(nproc) intl mbstring zip gd pdo pdo_pgsql opcache
+# Étape 2: Image finale pour l'application
+FROM php:8.3-fpm-alpine
 
-# Copy composer and node
-COPY --from=composer_base /usr/bin/composer /usr/bin/composer
-COPY --from=node_base /usr/local/bin/node /usr/local/bin/node
-COPY --from=node_base /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-  && ln -s /usr/local/lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
-  && corepack enable
+# Installer les extensions PHP nécessaires
+RUN apk add --no-cache postgresql-dev \
+    && docker-php-ext-install pdo pdo_pgsql
 
+# Créer un utilisateur non-root
+RUN addgroup -g 1000 laravel && adduser -G laravel -g laravel -s /bin/sh -D laravel
+
+# Définir le répertoire de travail
 WORKDIR /var/www/html
 
-# Copy composer files and install deps
-COPY composer.json composer.lock* ./
-RUN composer install --no-dev --prefer-dist --no-ansi --no-interaction --no-progress --no-scripts --optimize-autoloader
+# Copier les dépendances installées depuis l'étape de build
+COPY --from=composer-build /app/vendor ./vendor
 
-# Copy app source
-COPY . .
+# Copier le reste du code de l'application
+COPY --chown=laravel:laravel . .
 
-# Build assets with vite (if present)
-RUN if [ -f package.json ]; then \
-      npm ci --no-audit --no-fund; \
-      npm run build; \
-    fi
+# Créer les répertoires nécessaires et définir les permissions
+RUN mkdir -p storage/framework/{cache,data,sessions,testing,views} \
+    && mkdir -p storage/logs \
+    && mkdir -p storage/app/public \
+    && mkdir -p bootstrap/cache \
+    && chown -R laravel:laravel /var/www/html \
+    && chmod -R 775 storage bootstrap/cache \
+    && chmod -R 775 storage/app
 
-# Laravel optimize (no .env needed for these compile steps)
-RUN php artisan vendor:publish --tag=laravel-assets --force || true \
- && php artisan view:cache || true \
- && php artisan route:cache || true \
- && php artisan config:cache || true
+# Ne PAS créer de .env ici - utiliser les variables d'environnement de Render
 
-# ---------- Runtime stage ----------
-FROM nginx:1.27-alpine AS runtime
+# Copier le script d'entrée en tant que root
+COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && chown laravel:laravel /usr/local/bin/docker-entrypoint.sh
 
-# Install PHP-FPM runtime
-RUN apk add --no-cache php83 php83-fpm php83-opcache php83-pdo pgsql-client php83-pdo_pgsql php83-mbstring php83-intl php83-zip php83-gd php83-session php83-xml php83-fileinfo bash curl
+# Passer à l'utilisateur non-root
+USER laravel
 
-# Configure PHP-FPM
-RUN mkdir -p /run/php
-COPY --from=build /usr/local/etc/php/conf.d /etc/php83/conf.d
+# Exposer le port
+EXPOSE 8000
 
-# Copy application from build
-WORKDIR /var/www/html
-COPY --from=build /var/www/html /var/www/html
-
-# Nginx config
-COPY nginx/nginx.conf /etc/nginx/nginx.conf
-
-# Entrypoint
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Ensure correct permissions for storage and bootstrap/cache
-RUN chown -R nginx:nginx storage bootstrap/cache \
- && chmod -R ug+rwX storage bootstrap/cache
-
-ENV APP_ENV=production \
-    APP_DEBUG=false \
-    PHP_FPM_SOCK=/run/php/php-fpm.sock \
-    PORT=8086
-
-USER nginx
-
-EXPOSE 8086
-
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["sh", "-c", \
-  "php-fpm83 --nodaemonize --fpm-config /etc/php83/php-fpm.conf & nginx -g 'daemon off;'" \
-]
+# Point d'entrée - le script lance directement php artisan serve
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
