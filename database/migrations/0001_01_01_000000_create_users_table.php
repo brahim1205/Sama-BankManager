@@ -11,29 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('users', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('email')->unique();
-            $table->timestamp('email_verified_at')->nullable();
+        Schema::create('users', callback: function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('nom', 50)->index();
+            $table->string('prenom', 70)->index();
+            $table->string('email')->unique()->index();
+            $table->string('telephone', 80)->unique()->index();
+            $table->string('adresse', 150)->index();  
+            $table->string('nci', 60)->unique()->index();
             $table->string('password');
-            $table->rememberToken();
+            $table->string('is_verified')->default('false');
+            $table->string('code_verification', 6)->nullable();
+             $table->string('password_temporaire')->nullable();
+            $table->softDeletes();
             $table->timestamps();
-        });
-
-        Schema::create('password_reset_tokens', function (Blueprint $table) {
-            $table->string('email')->primary();
-            $table->string('token');
-            $table->timestamp('created_at')->nullable();
-        });
-
-        Schema::create('sessions', function (Blueprint $table) {
-            $table->string('id')->primary();
-            $table->foreignId('user_id')->nullable()->index();
-            $table->string('ip_address', 45)->nullable();
-            $table->text('user_agent')->nullable();
-            $table->longText('payload');
-            $table->integer('last_activity')->index();
         });
     }
 
@@ -43,7 +34,6 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('users');
-        Schema::dropIfExists('password_reset_tokens');
-        Schema::dropIfExists('sessions');
     }
 };
+
